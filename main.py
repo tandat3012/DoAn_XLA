@@ -1,45 +1,99 @@
 import cv2
+from ultralytics import YOLO
 
-cap = cv2.VideoCapture('youtube.mp4')
-face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-fullbody_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_fullbody.xml')
+# ================== LOAD ==================
+VIDEO_PATH = r"D:\Xu_li_anh\dataset\mubaoho0.mp4"
+MODEL_PERSON_PATH = 'yolov8n.pt'
+MODEL_HELMET_PATH = r'./best.pt'
 
-while(True):
-    #doc lan luot cac frame tu camera
+PERSON_ID = 0
+HELMET_ID = 8
+
+cap = cv2.VideoCapture(VIDEO_PATH)
+
+model_person = YOLO(MODEL_PERSON_PATH)
+model_helmet = YOLO(MODEL_HELMET_PATH)
+
+def detect_person(frame):
+    results = model_person(frame, conf=0.4, verbose=False)[0]
+    persons = []
+
+    for box in results.boxes:
+        if int(box.cls[0]) == PERSON_ID:
+            x1, y1, x2, y2 = map(int, box.xyxy[0])
+            persons.append((x1, y1, x2, y2))
+
+    return persons
+
+
+def detect_helmet(person_crop):
+
+    helmet_results = model_helmet(person_crop, conf=0.15, verbose=False)[0]
+    helmets = []
+
+    for box in helmet_results.boxes:
+        if int(box.cls[0]) == HELMET_ID:
+            hx1, hy1, hx2, hy2 = map(int, box.xyxy[0])
+            helmets.append((hx1, hy1, hx2, hy2))
+
+    return helmets
+
+def check_has_helmet(person_crop, helmet_boxes):
+    h, w, _ = person_crop.shape
+    head_limit = int(h * 0.4)  # 40% phía trên
+
+    for hx1, hy1, hx2, hy2 in helmet_boxes:
+        helmet_center_y = (hy1 + hy2) // 2
+
+        if helmet_center_y < head_limit:
+            return True
+
+    return False
+while cap.isOpened():
     ret, frame = cap.read()
-
-    #frame = cv2.flip(frame, 1)
-
     if not ret:
         break
-    
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-    bodies = fullbody_cascade.detectMultiScale(gray,
-                                  scaleFactor=1.1,
-                                  minNeighbors=5,
-                                  minSize=(30,30))
+    frame = cv2.resize(frame, (800, 500))
 
-    for body in bodies:
-        x, y, w, h = body
-        body_crop = gray[y:y+h, x:x+w] #do tren numpy nen y truoc x sau
+    persons = detect_person(frame)
 
-        
+    for (x1, y1, x2, y2) in persons:
+        person_crop = frame[y1:y2, x1:x2]
+        if person_crop.size == 0:
+            continue
 
-        cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 0, 255), 3)
-        cv2.putText(frame, 'Person', (x+w+3, y+h//2), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 3)
+        helmets = detect_helmet(person_crop)
+        has_helmet = check_has_helmet(person_crop, helmets)
+ 
 
-        faces = face_cascade.detectMultiScale(body_crop)
-        for face in faces:
-            fx, fy, fw, fh = face
-            cv2.rectangle(frame, (fx+x, fy+y), (fx+fw+x, fy+fh+y), (0, 255, 0), 3)
-            cv2.putText(frame, 'face', (fx+fw+x+3, fy+fh//2+y), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 3)
+        # ===== VẼ KẾT QUẢ =====
+        if has_helmet:
+            color = (0, 255, 0)      
+        else:
+            color = (0, 0, 255)
+        text = "AN TOAN" if has_helmet else "KHONG DOI MU"
 
+        cv2.rectangle(frame, (x1, y1), (x2, y2), color, 3)
+        cv2.putText(frame, 
+                    text, 
+                    (x1, y1 - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX, 
+                    0.8, 
+                    color, 
+                    2)
 
-    cv2.imshow('camera streaming', frame)
-    key = cv2.waitKey(1)
-    if key == 27:
+        # Vẽ mũ
+        for hx1, hy1, hx2, hy2 in helmets:
+            cv2.rectangle(frame,
+                          (hx1 + x1, hy1 + y1),
+                          (hx2 + x1, hy2 + y1),
+                          (0, 255, 0), 2)
+
+    cv2.imshow("PHAT HIEN MU BAO HO", frame)
+    if cv2.waitKey(1) == 27:
         break
 
 cap.release()
 cv2.destroyAllWindows()
+
